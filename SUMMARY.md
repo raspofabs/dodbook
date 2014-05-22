@@ -7,7 +7,7 @@
     * [Data and Statistics](sub-dod/dataandstats.md)
     * [Data Changes](sub-dod/datachanges.md)
     * [How is Data Formed](sub-dod/dataform.md)
-    * [Providing a Computational Framework](sub-dod/computationalframework.md)
+    * [Providing a Computational Framework](sub-dod/comp.md)
 * [Exist](exist.md)
 * [Component](component.md)
 * [Hier](hier.md)
