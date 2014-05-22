@@ -133,6 +133,9 @@ sort, they’re not going to adversely affect the profile as much as the
 problem being overcome here, namely the mixing of hot[^1] data into the
 middle of the entity class.
 
+[^1]: hot data is the member or members of a class that are accessed
+    with high frequency, and there can even be multiple per class.
+
 Another example is with AI. If you have all your entities maintain a
 team index, then you have to check each entity before reacting to them.
 If you want to avoid all the entities from team x, and head towards the
