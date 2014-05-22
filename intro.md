@@ -1,0 +1,67 @@
+Introduction
+============
+
+It took a lot longer than expected to be able to write this book, but
+it’s been all the better for how long the ideas have been fermenting in
+my head and how many of the concepts have been tested out in practice.
+In many cases, the following chapters are ideas that started out as
+simple observations and slowly evolved into solid frameworks for
+building software in a data-oriented manner. Some sections have remained
+largely unchanged from their first drafts, such as the sections on
+existence based processing or the arguments against the object-oriented
+approach, but others have been re-written a number of times, trying to
+distill just the right kind of information at the right pace.
+
+Most people come at data-oriented design from object-oriented design,
+and have heard of it only because of people claiming that
+object-oriented design is bad, or wrong, or simply not the only way of
+doing things. This may be the case for large scale software, and though
+object-oriented code does have its place (as we shall discuss in chapter
+[chap:harm]), it has been the cause[^1] of much wasted time and effort
+during its relatively short life in our passionate industry of software
+development and games development in particular.
+
+My own journey through imperative procedural programming, then
+Object-oriented programming then finally finding, embracing, and now
+spreading the word of Data-Oriented design, all started with C++. I like
+to think of C++ as a go to language for the best of both worlds when you
+require one of the worlds to be assembly level quality of a control over
+your instructions. The other world is the world of abstractions, the
+ability to create more code that does more in less time. Over the years,
+I have learned a great deal about how C++ helps add layer upon layer of
+abstraction to help make less code do more, but I’ve also seen how the
+layers of various quality code can cause a cascade of errors and
+unmaintainable spaghetti that puts off even the most crunch hardened
+programmers.
+
+I’d like to thank those who have helped in the making of this book,
+whether by reading early versions of this text and criticising the
+content of structure, or by being an inspiration or guiding light on
+what would truly best represent this new paradigm. You can thank the
+critics for the layout of the chapters and the removal of so much of the
+negativity that originally sat on the pages in the critique of design
+patterns. Design patterns are very nearly the opposite of data-oriented
+design; it was natural that they took a beating, but the whole chapter
+felt like a flame war so was removed.
+
+This book is a practical guide for serious game developers. It is for
+game developers working to create triple A titles across multiple
+platforms, for independent developers trying to get the most out of
+their chosen target hardware, in fact for anyone who develops cutting
+edge software in restrictive hardware. It is a book about how to write
+code. It is a book written to educate games developers in a coding
+paradigm that is future proof, unlike the style of coding we’ve become
+so accustomed to. It is a book rooted in C++, the language of choice by
+games developers of the last ten years, and provides practical advice on
+how to migrate without throwing away years of accumulated code and
+experience. This book is about how you can transform your development.
+
+If you’re a diehard object-oriented programmer who doesn’t believe all
+this hype around this new pseudo-paradigm, then you’ve probably not even
+picked up this book, but for those that do, I hope that this book will
+give you the chance to change your mind. So here’s to opening minds, but
+not so much that your brains fall out.
+
+[^1]: Large Scale C++ is a book almost entirely dedicated to showing how
+    object oriented development needn’t destroy the productivity of
+    large scale software projects
