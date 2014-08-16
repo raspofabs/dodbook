@@ -17,7 +17,7 @@ and have heard of it only because of people claiming that
 object-oriented design is bad, or wrong, or simply not the only way of
 doing things. This may be the case for large scale software, and though
 object-oriented code does have its place (as we shall discuss in chapter
-[chap:harm]), it has been the cause[^1] of much wasted time and effort
+[chap:harm]), it has been the cause[1] of much wasted time and effort
 during its relatively short life in our passionate industry of software
 development and games development in particular.
 
@@ -62,6 +62,6 @@ picked up this book, but for those that do, I hope that this book will
 give you the chance to change your mind. So here’s to opening minds, but
 not so much that your brains fall out.
 
-[^1]: Large Scale C++ is a book almost entirely dedicated to showing how
+[1]: Large Scale C++ is a book almost entirely dedicated to showing how
     object oriented development needn’t destroy the productivity of
     large scale software projects

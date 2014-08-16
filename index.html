@@ -1,0 +1,35 @@
+<head>
+<script type="text/javascript" src="jquery-1.11.1.min.js"></script>
+<script type="text/javascript" src="showdown.js"></script>
+<script type="text/javascript">
+var converter;
+function GetURLParameter(sParam) {
+    var sPageURL = window.location.search.substring(1);
+    var sURLVariables = sPageURL.split('&');
+    for (var i = 0; i < sURLVariables.length; i++) {
+        var sParameterName = sURLVariables[i].split('=');
+        if (sParameterName[0] == sParam) {
+            return sParameterName[1];
+        }
+    }
+}
+
+function Init() {
+	var page = "SUMMARY.md";
+	var dest = GetURLParameter("page");
+	if( dest ) {
+		page = dest;
+	}
+	converter = new Showdown.converter();
+	$.get(page, function( data ) {
+			newHtml = converter.makeHtml(data);
+			newHtml = newHtml.replace(/"([a-z-\/]+\.md)"/g,"index.html?page=$1");
+			$("body").html( newHtml );
+			});
+}
+$(document).ready(Init);
+</script>
+</head>
+<body>
+Book
+</body>
