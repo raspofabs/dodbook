@@ -1,0 +1,688 @@
+\chapter{Design Patterns}\label{chap:designpatterns}
+
+\section{What caused design patterns}
+
+Design patterns came about as a way of writing down and transferring the
+knowledge gained from experience, originally in architectural design with the
+term coined as Patterns by Christopher Alexander. Software design patterns came
+about from experience developing object-oriented software. The new prefixed
+name was used in the title of the book \emph{Design Patterns: elements of
+Reusable Object-Oriented Software} released in 1994, and has stuck ever since.
+
+Using design patterns, it was found that the strategies and solutions to common
+activities and problems could be expressed as a pattern language of requirement
+and designs for structuring and the strategies for actions taken on them. This
+reusable design would be too complex to write as a templated function or a
+library of reusable code as it describes a solution that would normally require
+interfacing with and thinking about how it applies to your particular situation
+and code base. The reason why the solution is too complex to write is not
+because the problem being solved is complex in itself, but that the solution is
+normally rooted in the problem domain rather than any specific programming
+language. However, the solution is only complex because it roots itself in the
+representation provided by the object-oriented language that was used to bring
+the design, in this case the problem domain itself, into the code in order for
+it to be solved. If the problem was not represented by objects but instead left
+as a technical design, then many design patterns would not be required. This is
+why when people talk about software design patterns they have to reference them
+as elements of reusable object-oriented design rather than elements of reusable
+software engineering.
+
+\section{Data-Oriented Design Patterns}
+
+Even though the original design patterns were elements of reusable
+Object-Oriented Design, there is scope for some pattern language for
+development given the Data-Oriented approach. Many of the sections so far have
+had an air of design pattern about them as they tend to solve generic problems
+with one or more generic solutions. This is where we gather and explain all the
+core patterns of development that are seen when working with a data-oriented
+code base, but always remember, a design pattern is a solution looking for a
+problem, and that alone is enough reason to be wary. In data-oriented design,
+we prefer to use design patterns as they were initially intended, as a way of
+communicating between engineers without needing to describe all the reasoning
+behind it. These architectural design patterns were a kind of written down
+common sense, which means in some sense, the data-oriented design patterns
+cannot be like these as common sense is often trumped by profiling or
+invention. Regardless, the ability to speak a common tongue is enough to merit
+trying to define some of the patterns present.
+
+\subsection{A to B transform}
+
+A stateless function that takes elements from one container and produces
+outputs into another container. All variables are constant over the lifetime of
+the transform.
+
+The normal way of working and the best way to guarantee that your output and
+input tables don't clash, is to create a new table and transform into it. The A
+to B transform is also the basis of double buffered state and provides a
+powerful mechanism for enabling concurrent processing as you can ensure that A
+is read only, and B is write only for the whole time slice. The A to B
+transform is the transform performed by shaders and other compute kernels, and
+the same conditions apply: constants do not change, local variables only,
+globals are considered to be constants, data can be processed in any order and
+without any communication to any other element in the transform.
+
+A to B transforms aren't expensive unless the row counts change, and even then
+you can mitigate those more expensive transforms with conc-trees and other in
+place transforms that reduce in the case of filtering transforms. There are two
+things to consider when transforming from one table to another:
+
+Is this a transform to create new, or an updated state? Is this transform
+going to significantly change the values before they hit the output table?
+
+The simplest transform is an update. This allows for concurrent state updates
+across multiple associated systems without coupling. The condition table
+transform is generally used to significantly change the values, putting them
+into a new table with a different schema, ready for decision transforms.
+Sometimes a transform will do more than one of these, such as when an update
+also emits rows into an event table ready for subscribing entities to react to
+a state change on the data.
+
+An important requirement of the transform is that it is stateless. Transforms
+operate on data, use constants to adjust how they transform that data, and
+output in a standardised manner. Some amount of restriction needs to be set up
+for the transforms to be worth doing, however, and one of those restraints is
+that the transform must be stateless. The data has state, but the transforms
+must not. If you look at how the design pattern works for existing streaming
+transform engines such as GPU shader models, you will see that the shader
+constants are uniform across all the elements in one render call, this allows
+for easy distribution of work across many different workers, even on different
+machines. You can have local working variables, but you cannot store out to
+some common location as that would introduce some coupling, potentially making
+one part of a kernel serial in an otherwise completely parallel process. Even
+accumulation over successive elements would mean that the input to one element
+depended on the output of another, which would immediately cause the whole
+process to become serial in nature.  If you do this, you are going to break the
+fundamental parallelisable nature of the transform process, and with it, doom
+your code to running only as fast as one of your workers can handle the data.
+
+\subsection{In place transform}
+
+A stateless function that changes the data in a container based on constants
+alone.
+
+There are times when that's not necessary to create a new table with a
+transform. In update calls for many tables, the update can in place modify
+rather than run as a double buffered state. The best way to in place modify can
+change depending on the layout of the data and what needs to be done with the
+data. Always consider how the data gets into the transform, and how it gets
+out.
+
+For inputs, make sure you find the optimal way to organise the pre-fetching so
+that the transform is never starved of data, for outputs, make sure that you
+write as much as you can in tightly packed consecutive memory to offer
+opportunity for write combining. The majority of cases have the same restrictions
+and benefits as A to B transform.
+
+If you are doing in place transforms, always remember to write back once at
+most for each transform, otherwise aliasing rules can bite, for example,
+writing to a local accumulator when the type of the accumulator is the same as
+a type being read from, then aliasing may require your accumulator to be
+re-read every time it is updated. One way around this is to mark all your
+elements as restricted, thus ensuring that the compiler will assume it's safe
+to use the last value without reloading, but this might be vendor specific so
+test by looking at the assembly produced before declaring that the restrict
+will fix the problems inherent in accumulators or other load-modify-store
+values that may be used in in-place transforms.
+
+Another thing to mention is that for both the in-place transform and the A to B
+transform, using a structure's static member is just as invalid as a global
+variable.
+
+\subsection{Generative transform}
+
+A function that generates data into an output container based on an algorithm
+rather than input data.
+
+Sometimes all you need is some constants and only one small piece of data to
+generate a whole new table. If you've got to build a world from scratch, you
+can generate your map with procedural generators, but you have to seed a
+procedural generator and the small inputs or constants. These are what drives
+these types of transform. You don't need a large input set to drive a file
+loader, and that can be considered a generative transform. If you put filenames
+into a \emph{load-me-please} table, and register a reaction transform into the
+\emph{file-has-loaded} event table, then you have a generative function as your
+streaming engine. You can write your bootstrap as a generative transform that
+introduces elements into multiple tables. If this transform is a script, then
+you have the basis for a completely data-driven development. If instead of a
+filename you provide a seed and expect to get back a chunk of terrain, whether
+by pure procedural generation, or loading, or some combination, then you have
+the basis for a distributed processing landscape system. In the chapter on
+hierarchical level of detail, the just-in-time memento that provides some style
+for a previously non-existent entity can be considered a generative transform.
+Taking an ID and generating a coherent collection of attributes that conforms
+to other constraints that might be present such as district, time of day,
+difficulty setting, or level of player.
+
+\subsection{Sorted Table}
+
+A container that keeps itself sorted, tunable for different circumstances
+including only sorting a small subset.
+
+A table that is only ever read after sorting can attempt to keep track of
+changes rather than sort before use. If the table needs to stay sorted no
+matter what, it can generate indexes with which it reorders the table on
+transform. There is hardly ever a good reason to explicitly sort a table, and
+usually there are better ways to organise data than sorted. Binary searches
+don't work as well in practice as b-trees due to the cache-friendly operations.
+
+\subsection{Multi sorted table}
+
+A container that keeps multiple sorted representations of itself available,
+tunable for circumstances including sorting different subsets based on
+different criteria.
+
+Much like the sorted table, but when a table has multiple queries all requiring
+different sorting algorithms, then it's better to give up and only use
+indirection via indexes according to what order each query requires. This is
+similar to how databases add indexes for each column that requests it.
+
+\subsection{Gatherer}
+
+A method by which large tasks can be split off into multiple parallel tasks and
+can then be reduced back into one container for further processing.
+
+When you run concurrent processes, but you require the output to be presented
+in one table, there is a final stage of any transform that turns all the
+different outputs into one final output. You can reduce the amount of work and
+memory taken up by using the concatenate function and generate a table that is
+a conc-tree, or you can use a gather transform. A gather transform has as many
+inputs as you have parallel tasks leading into the final output table, and
+each input is a queue of data waiting to enter the final transform. As long as
+the data is not meant to be sorted, then the gatherer can run while the
+concurrent transforms are running, peeling the transformed rows out of the
+processes independent output queues, and dropping them into the final output
+table. This allows for completely lockless parallelism of many tasks that don't
+require the data to be in any particular order at the final stage.
+
+If the gatherer is meant to produce the final table in the same order as the
+input table then you will need to pre-parse the data or have the gatherer use a
+more complex collating technique. When you pre-parse the data you can produce a
+count that can be used to initialise the output positions making the output
+table secure for the processing transforms to write directly into it, but if
+there is no way to pre-parse the data, then gatherer might need to co-operate
+with the task scheduler so that the processes are biased to return ealier work
+faster, making final collation a just in time process for the transfer to the
+next transform.
+
+\subsection{Tasker}
+
+When a container is very large, break off pieces and run transforms as
+concurrent tasks.
+
+When you have a single large table, you can transform it with one transform, or
+many. Using a tasker to fake multiple independent tables allows for concurrent
+transforming as each transform can handle their specific part of the input
+table without having to consider any of the other parts in any way.
+
+\subsection{Dispatcher}
+
+Rather than switch which instructions to run based on data in the stream,
+prefer producing new tables that can each be transformed more precisely.
+
+When operating on data, sometimes the transform is dependent on the data.
+Normally any enumerable types or booleans that imply a state that can change
+what transform is meant to run are hidden behind existence based processing
+tables, but sometimes it's good to store the bool or enum explicitly for size
+sake. When that is the case, it can be beneficial to pre-process a table and
+generate a job table, a table with a row for each transform that is meant to be
+run on the data.
+
+A dispatcher takes on input table and emits into multiple tables based on the
+data. This allows for rapid execution of the tasks without the overhead of
+instruction cache misses due to changing what instructions are going to be run
+based on the data as all the instructions are collected into each of the job
+tables.
+
+\section{Existing design patterns}
+
+Most of the Object-oriented design patterns aren't necessary in data-oriented
+development, but explaining why can be useful for migrating from the
+object-oriented way of working. Even though design patterns are founded in the
+world of object-oriented development, some design patterns have mirrors in the
+data-oriented world. Sometimes this is because the functionality is incredibly
+simple (such as with the factory), or because the design pattern is emulated by
+basic functionality of the data-oriented technique (such as flyweight).
+
+\subsection{Abstract Factories}
+
+The requirement for abstract factories comes from needing to generate new
+objects based on an overall scheme. This means creation can now be dependent on
+two data values: the first is the scheme, the second is the type requested for
+creation. This inherently object-oriented design problem stems from the desire
+to reuse code to drive object creation, but as C++ stops you from using objects
+by their features unless already declared in some way, it is hard to
+retroactively apply old creation techniques to new types. Normally we set up
+our classes by inheriting from an abstract base class so we can later provide
+new classes under new creation objects. The abstract factory is the eventual
+extension of allowing the creation function to be chosen at runtime based on
+the type of object required (which is statically checked) and the scheme or
+style of the object (which is dynamically calculated by the abstract factory),
+so choosing the right concrete factory object to create your new object.
+
+When writing component entity systems, this is the equivalent of having
+components being inserted into an entity based on two dimensional data. The
+fact that a component of a certain type needs creating (the create call) is
+emulated by the row in the component create table, and the abstract factory
+calling into a concrete factory is emulated by the value causing the create
+call to be dispatched to an appropriate final factory table. Only once it has
+been dispatched to the right table does it get inserted into the final concrete
+component table.
+
+This pattern is useful for multi-platform object-oriented development where you
+might have to otherwise refactor the internals of your object creators, but
+with a component driven approach, you can switch your output tables,
+transforms, or complete tree of transforms without losing consistency where it
+is necessary.
+
+\subsection{Builder}
+
+The builder pattern is all about wrapping up collections of reusable low-level
+parts of a complex transform in order to provide a tool kit for macro scale
+programming within a problem domain. The builder pattern is used when you want
+to be able to switch which tool-kits are used, thus providing a way of giving a
+high level program the ability to direct the creation of objects through the
+interface of a collection of tools.
+
+This can be seen to parallel the tool-kit of transforms you tend to build when
+developing with tables. With a data-oriented functional programming approach,
+we don't immediately call builders, but instead generate the necessary build
+instructions that can then dispatched to the correct parallel processes where
+possible before being reduced into the final data. Usually the builders are
+stateless transforms that convert the request to build into data outputs, or
+take a small amount of input data and build it into larger or translated
+output.
+
+Once you work out that the builder pattern is mostly a rewording of procedural
+reuse with the addition of switching which procedures are called based on a
+state in a larger scope, it is easy to see why the pattern is applicable in all
+programming paradigms.
+
+\subsection{Factory Method}
+
+The factory method allows for data controlled choice of what is created. This
+is mirrored well in the component driven programming model, as all components
+are created via predictably called functions, but whether they are called is
+down to the data. Rather than a method, we use creation tables. Instances of
+entities and components are created when the system gets around to updating
+those tables. The creation request table contains the same arguments as the
+factory method, so the type and its arguments are used in that table update to
+cause an insert into the component or entity table. There is never any in-place
+creation, as there is never any need of it. Anything too complex to create as
+part of the output from a single transform deserves the attention of an
+explicit creation, and also will find it hard to mitigate the cost of creation
+out of the order of normal object creation, so will be less tempted to trash
+the instruction cache or derail the flow of the game for a special case like we
+find frequently in object-oriented development.
+
+\subsection{Prototype}
+
+The prototype pattern makes a lot of sense in an object-oriented code base, as
+the ability to generate more class instances from another class, only to modify
+it slightly before releasing it as finished almost gives you the flexibility to
+generate new classes at run-time, but any flexibility still has to be built
+into the classes before they can be used as the classes can only inherit from
+types existing at compile time. Some Object-oriented languages do let you
+generate new features at run-time but C++ doesn't allow for it without
+considerable coercion.
+
+The existence-based-processing way of working stops you from creating a
+prototype as its existence would imply that it is in the game. There is no
+place to hide a prototype. But, there is also little call for it as creating a
+prototype is about creating from a plan of sorts, and because all the component
+creation can be controlled via read-only or just-in-time mementos, its very
+easy to make new classes with their components defined and specialised without
+resorting to hacks like keeping in memory a runtime template for a class you
+might need later. Unlike the object-oriented prototype, the component system
+memento does not have all the feature of the final component set, it only has
+the features of a creation data-type and thus fit's its purpose more purely. It
+cannot accidentally be used and damaged in the way prototypes can, for example,
+prototypes can be damaged by global update functions that accidentally modified
+the state. Because the only difference between a prototype and the runtime
+instance is whether the program knows that they are prototypes, it's hard to
+secure them against unwanted messages.
+
+\subsection{Singleton}
+
+There is no reason to think that a single instance of a piece of data has any
+place in a data-oriented development. If the data is definitely unique, then it
+deserves to be exposed as a system wide global. It is only when globals are
+used for temporary store that they become dangerous. Singletons are an
+inherently object-oriented solution to a problem that only persists if you
+truly want to write platform ignorant code. Initialising and deinitialising
+managers in specific order for component managers, or for hardware or
+dependency sake can just as easily be managed explicitly, and is less prone to
+surprising someone. When you change the initialisation order accidentally by
+referencing a singleton, that reference won't be seen as changing the order of
+initialisation and it has been seen to cause quite difficult to debug when the
+effect of the change in order is subtle enough to not crash immediately.
+
+\subsection{Adapter}
+
+An adapter provides an API wrapper around an otherwise incompatible class.
+Classes have their APIs locked down after they are created. If two classes that
+need to work with each other come from third party software libraries, the
+likelihood of them being naturally compatible is low to non-existent. An
+adapter wraps the callee class in a caller friendly API. The adapter turns the
+caller class friendly API calls into callee class friendly API calls.
+
+When
+writing programs data-oriented, most data is structs of arrays or tables. In
+data-oriented development there is no reason for an adapter, as in the first
+case, a transform can easily be made to take arguments of the specific arrays
+used, and in the second case, the transform would normally take two or more
+schema iterators that traversed the table providing arguments to and capturing
+outputs from the transform. In a sense, every table transform iterator is an
+adapter because it converts the explicit form of the table into the explicit
+form accepted by the transform.
+
+Finally, data itself has no API, and thus the idea of an adapter is not
+appropriate as there is nothing to adapt from, so this relegates the idea to
+the concept of transforming the data so it can be provided to third party
+libraries. Preparing data for external processes is part of working with other
+code, and is one of the prices you pay for not having full control of the
+source code. The adapter pattern doesn't help this in any way, only provides
+a way of describing the inevitable.
+
+\subsection{Bridge}
+
+The bridge pattern is an object-oriented technique for providing encapsulation
+from implementation when the class's implementation is the functionality that
+derived classes use to get by in their world. For example, the platform
+specific code for an object can be privately owned by the parent class, and the
+concrete class can derive from that class. Then, it can use the implementation
+of it's parent class, but the implementation of the parent class member
+functions can be indirectly implemented differently depending on the platform.
+This way, the child class can call its parent's functions to do what it needs to
+do, while the parent class can call the implementation's functions which can be
+defined at runtime or compile time depending on what level of polymorphism is
+required.
+
+Because all platform specific functionality is defined inside transforms and
+the way in which they are called, there is no reason to consider this pattern
+for platform independent reasons. All that is needed to benefit from the side
+effect of using this pattern is to recognise the boundary between platform
+specific transforms and platform independent transforms. For situations where
+the parent class implementation differs from instance to instance, you only
+need to notice that components can be different, yet still register with the
+same events. This means, any differing implementations required can be added as
+additional components which register into the same event tables as the existing
+components and replace those on creation as part of the different creation
+sequence.
+
+Also, transforms that take data and do with it something platform specific
+would be written statically for each platform. This kind of object-oriented
+approach to everything can be what gives object-oriented development such a bad
+name when it comes to performance. There's not really any benefit to making
+your choice of implementation a runtime polymorphic call when the call can only
+ever be to one concrete method per platform as, at least in C++, there is not
+such thing as platform independent builds. For C\#, it can be different, but
+the benefit of doing it is just the same, you only benefit very slightly when
+it comes to readability in the code, but you lose on every call at runtime.
+
+\subsection{Composite}
+
+Unlike it's programming namesake, the composite pattern is not about an object
+being made out of multiple other classes by owning them in the implementation.
+The composite pattern is the idea that an object that is part of a system can
+be identified as a single object, or as a group of objects. Usually, a game
+entity references one renderable unit with a single AI instance, which is why
+this pattern can be useful. If an enemy unit class can represent a single unit,
+or a squad of units, then it becomes easier to manage commands in a real time
+strategy game, or organise AI path finding.
+
+When you don't use objects, the level of detail of individual parts of entities
+are not so hard tied to each other as the entities are not objects. When you
+design your software around objects you get caught up thinking about each
+object as being indivisible, and thus the composite pattern lets you at least
+handle objects in groups. If you don't limit your data by tying it to objects,
+then the pattern is less useful as you can already manipulate the data by group
+in any way you require.
+
+\subsection{Decorator}
+
+The decorator acts much like adding more components to an entity. Their effect
+comes online when their existence marks their necessity. Decorators add
+features, which is exactly like the entity components with their ability to add
+attributes and functionality to a referenced entity.
+
+\subsection{Fa\c{c}ade}
+
+Even though there are no tangled messes of interacting objects in the
+data-oriented approach, sometimes it might be better to channel data through a
+simpler set of streams. This could be considered to offer the same smaller
+surface area that the fa\c{c}ade offers.
+
+\subsection{Flyweight}
+
+The flyweight pattern offers a way to use very fine grain elements in the same
+way it uses larger constructs. In data-oriented development there is no need to
+differentiate between the two, as there is no inherent overhead in interfacing
+data in a data-oriented manner. The reason for a flyweight is similar to the
+reason for the bridge pattern, once you start thinking object-oriented and want
+to keep your whole codebase working like that, you can end up painting yourself
+into a corner about it and start adding objects to everything, even things that
+are too small or fragile for such a heavy handed, human centric way of seeing
+and manipulating the data.
+
+\subsection{Proxy}
+
+In a sense, the proxy pattern is much like the level of detail system in most
+games. You don't load final assets until you are near enough to need them. This
+topic was fully covered in chapter \ref{chap:hier}.
+
+\subsection{Chain Of Responsibility}
+
+The only problem with the chain of responsibility is that in most
+implementations it is inherently serial for all the possible recipients
+interested in responding to it. If we remove the possibility of the event being
+marked as handled, then the pattern is better handled through existence based
+processing than through object-oriented design, as existence-based-processing
+offers a way to subscribe at multiple points in the same entity with different
+components wanting to respond to different parts of a new event. If you want to
+enable such things as marking as handled, then it might be better to have a
+responsibility table for each message or event type with a dispatcher heading
+off the message before it hits the general message queue.
+
+\subsection{Command}
+
+This is realised fully when using tables to initiate your actions. All actions
+have to exist as a row in a table at some point, usually as a condition table
+row in the first place.
+
+\subsection{Interpreter}
+
+This design pattern doesn't seem very well suited to Object-oriented
+programming at all, though it is rooted in data driven flow control. The
+problem with the interpreter is it seems to be the design pattern for parsers,
+but doesn't add anything in itself.
+
+\subsection{Iterator}
+
+Although the table iterators that convert table schema into transform arguments
+are iterators, they don't fit into the design pattern because they are a
+concrete solution to iterating over tables. There is no scope for using them
+for arguments to functions or using them to erase elements and continue, they
+are stateful, but restricted to their one job. However, because there are no
+containers in table oriented solutions other than the tables, we can safely
+ignore true iterators as a design. In a stream based development, iterators are
+so common and pure, they don't really exist in the design pattern sense.
+
+\subsection{Mediator}
+
+The mediator can be thought of as a set up involving attaching event transforms
+to table updates. When a table entry updates, the callback can then inform the
+other related tables that they need to consider some new information. However,
+this data hiding and decoupling is not as necessary in data-oriented
+development as most solutions are considering all the data and thus don't need
+to be decoupled at this level.
+
+\subsection{Memento}
+
+Stashing a compressed state in a table is very useful when changing level of
+detail. Much was made of this in count lodding. Mementos also provide a
+mechanism for undoing changes, which can be essential to low memory usage
+network state prediction systems, so they can rollback update, and fast forward
+to the new predicted state.
+
+\subsection{Null Object}
+
+A null object is a pattern to stop unnecessary branching and checking when a
+fetch operation returns a class instance. If the instance was null, then
+returning the null object allows the calling code to continue on as if it had
+received a valid object. This is unnecessary in table driven processing
+scenarios as the transforms run over data. There is no chance for a transform
+to run into a null pointer as pointers are banned in general.
+
+\subsection{Observer}
+
+The publish and subscribe model presented in the table based event system is an
+observer pattern and should be used whenever data relies on some other data.
+The observer patter is high latency, but provides for callbacks, event
+handling, and job starting. In most games there will be an observer registry
+for the frame sync, the physics tick, the AI tick and for any IO completion.
+User defined callback tables will be everywhere, including how many finite
+state machines are implemented.
+
+\subsection{State}
+
+Data controlling the flow of the program is considered an anti-pattern in
+data-oriented development, so this design pattern is to be understood, and
+never used in the way it is presented. Instead, have your state be implicitly
+defined by the table in which your entity resides. Using table existince to
+drive the transform that is called is the basis of finite state machine update,
+if not the alphabet response.
+
+This design pattern is highly dangerous for any game that wants to run at high
+speed with a high entity count.
+
+\subsection{Strategy}
+
+\subsection{Template Method}
+
+The template method can still be used but overriding the calls by removing the
+template callbacks and adding the specific new callbacks would be how you
+organise the equivalent of overriding the virtual calls.
+
+\subsection{Visitor}
+
+The visitor pattern would be fine if it were not for the implicit allowance for
+it to be stateful. If the visitor was not allowed to accumulate during it's
+structure traversal, then it would be an in-place transform. By not defining it
+as a stateless entity, but a stateful object that walks the container, it
+becomes an inherently serial, cache unfriendly container analyser. This pattern
+in particular is quoted by people who don't understand the fundamental
+requirements of a transform function. If you talk to an Object-Oriented
+programmer about taking a list of data and doing a transform on it, they will
+tend to mention it as the visitor patter because there is a tendency to fit
+solutions to problems with design patterns. The best way to define a visitor
+pattern is an object that changes state based on the incoming data. The final
+state is dependent on the order in which the data is given to the visitor, thus
+it is a serial operation. The best analogy to a transform is not compatible
+with a visitor because a transform pattern denies the possibility of
+accumulation.
+
+\section{Locking out anti-patterns}
+
+In addition to the design patterns, the elements of reusable object-oriented
+software, there are also the anti-patterns, the elements of miserable software.
+Sometimes a particularly bad way of doing something turns up way more often
+than it should, and when it does, it begins to get a name for itself.
+data-oriented development helps reduce these by both not being as complex to
+begin with because the problem domain is not dragged into a new language of
+objects, nor does it have objects themelves, which can cause multiple problems
+due to their sometimes coarse and sometimes too fine nature.
+
+\subsection{Abstraction Inversion}
+
+Abstraction inversion is when some internal functions of a class are kept
+hidden, but they are useful, so an external developer has to reinvent those
+internal functions as external functions by using only the public interface,
+which itself will probably be using the internal functions these new external
+functions are trying to replicate. Do this enough times with even the simplest
+of classes and you can explode the amount of work required to do a simple job.
+
+As there is no inherent data or function hiding during data-oriented
+development, there can be no barrier to using the functions or the transforms
+that you want to use.
+
+\subsection{Acme Pattern / God Class}
+
+One giant class that runs the show. One very large data clump that is almost
+certainly a mess when it comes to organising the data by when it is accessed.
+Because there are no objects and we normalise our data, this anti-patterns
+becomes relatively difficult to experience. There is still the chance that
+someone might try to implement a nosql version of data-oriented development,
+but even if they do, most of the problems go away under struct of arrays. When
+it comes to the problem of all the methods in one class, then we know we're
+fine as there are no such boundaries.
+
+\subsection{CObject / Cosmic Hierarchy}
+
+Almost the pure opposite of the God Class, the CObject does nothing, and is
+inherited whether directly or indirectly by everything.  Many game engines have
+a concept of an entity or an object, but they generally don't keep it pure out
+of good practice. The threat of starting a cosmic hierarchy has reduced the
+chance of people making another CObject. The idea that everything comes from a
+base object class tends to encourage hard to read code. Code that divines the
+type of object before use suffers from overly long preamble in functions, and
+suffers from runtime type checking overhead. It's common knowledge that the
+preamble code - such things as "if type == foo" or checks for NULL - or the
+runtime type checking aren't overly expensive. This common knowledge has long
+outlived its lifespan though, and is provably a lie.
+
+At the root of a lot of object-oriented entity systems lies a core class to
+which everything can be cast. This usually leads to lots of problematic code
+that costs cycles and can cause bugs by not correctly identifying itself.
+
+In data-oriented development there is no Cosmic base class, even entities in an
+entity system only refer to entities. Each component will have a manager, and
+the idea of any component sharing some common core with another component goes
+so far away from the point of separating an entity into components that you
+should be hard pressed to find something that commits this anti-pattern.
+
+\subsection{Hidden Requirements}
+
+Sometimes a basic design change is required by a long standing requirement
+accidentally omitted from the original and all subsequent design documents. In
+object-oriented development, making a refactor at a late stage is very costly
+as object contracts can be hard to adjust without causing a very large amount
+of related changes to all the code that touches the changed class.
+
+Luckily, in data-oriented development, changing everything does not get much
+harder the longer the project continues because there are documented tools and
+techniques for making large scale schema changes in database technologies, and
+table based development can reap benefits there by literally implementing the
+same migrational tool-chain that is used in those circumstances.
+
+\subsection{Stovepipe}
+
+The more that bugs are fixed and corner cases are added, the harder it can be
+to refactor an existing Object-oriented codebase. This is not as true in
+data-oriented as towards the end of a project the difficultly in refactoring
+the design should be mitigated by the understanding and transparency of the
+whole program.
+
+\section{Game Development Patterns}
+
+The Game/Session/Level/Entity hierarchy still applies, and can be gathered
+accurately as part of the data flow analysis done during the early stages of
+design iteration. If you use tables for most of your data, then you will find
+that each layer has a set of tables.
+
+Tick or update scheduling is normally necessary in order to maintain data
+scheduling, but as the data flow is paramount in data-oriented development,
+there is no need for a dedicated scheduler. In fact, the sequences of
+transforms replace the scheduler normally found in games by having a cascade of
+dependencies play out in the instance of a new frame being rendered. A frame
+buffer swap is an event that begins a new sequence of processes. In some games
+this could be the gathering of controller updates followed by physics and logic
+updates, finally culminating in an update of the renderable scene.
+
+Double and Triple Buffering, which is normally the only way of getting near a
+good framerate, by processing multiple stages over multiple frames, may not
+need to happen so much as it does with object-oriented code as data-oriented
+code is much more parallelisable, so doesn't have the long critical path
+between input and rendering output. Removing multiple serial points can
+drastically reduce your overall gameplay feedback latency.
+
+

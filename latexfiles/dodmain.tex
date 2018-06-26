@@ -1,0 +1,86 @@
+% \documentclass[10pt]{book}
+\nonstopmode
+\documentclass[10pt,a5paper]{book}
+\usepackage[a5paper]{geometry}
+\usepackage[all]{xy}
+\usepackage{amsmath}
+% \usepackage{helvet}
+% \renewcommand*\familydefault{\sfdefault} %% sets the basefont to be sans-serif
+% \usepackage[T1]{fontenc}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{color}
+\usepackage[usenames]{xcolor}
+% \usepackage [english]{babel}
+% \usepackage [english = american]{csquotes}
+% \MakeOuterQuote{"}
+\definecolor{dkgreen}{rgb}{0,0.3,0}
+    \lstset{ %
+    	language=C++,
+    	basicstyle=\scriptsize\ttfamily,
+    	numbers=left,
+    	numberstyle=\tiny\color{gray},
+    	numbersep=15pt,
+    	backgroundcolor=\color{white},
+    	showspaces=false,
+    	showstringspaces=false,
+    	showtabs=false,
+    	frame=single,
+    	rulecolor=\color{black},
+    	tabsize=2,
+    	captionpos=b,
+    	breaklines=true,
+    	breakatwhitespace=false,
+    	title=\lstname,
+    	keywordstyle=\color{blue},
+    	commentstyle=\color{dkgreen},
+    	stringstyle=\color{red},
+    }
+\def\mypart#1#2{%
+	\par\newpage\cleardoublepage % Page break
+	\vspace*{4cm}
+	\refstepcounter{part} % Next part
+	{\centering\Large Part \thepart.\par}% 
+	\vspace{1cm}
+	{\centering\textbf{\Huge #1}\par}% 
+	\vspace{2cm}
+	% Some text
+	 #2
+	\vfill\break % Fill the end of page and page break
+}
+\begin{document}
+\title{Data-Oriented Design}
+\author{Richard Fabian}
+\maketitle
+\thispagestyle{empty}
+\pagenumbering{roman}
+\setcounter{tocdepth}{1}
+\tableofcontents
+% begin the book real
+\include{dod-intro} 
+\setcounter{page}{1}
+\pagenumbering{arabic}
+% high level
+\include{dod-data-oriented}
+%\include{dod-count}
+\include{dod-exist}
+\include{dod-component}
+\include{dod-hier}
+\include{dod-condition}
+\include{dod-fsm}
+\include{dod-search}
+\include{dod-sort}
+\include{dod-RDB}
+\include{dod-optim}
+%% low level
+\include{dod-conc}
+%% examples
+\include{dod-example}
+\include{dod-maintenance}
+\include{dod-patterns}
+%% theory
+\include{dod-harm}
+\include{dod-hardware}
+\include{dod-future}
+\end{document}
+

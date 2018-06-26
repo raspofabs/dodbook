@@ -1,0 +1,612 @@
+\chapter{What's wrong?}\label{chap:harm} What's wrong with Object-Oriented
+Design? Where's the harm in it?
+
+Over the years, games developers have taught themselves to write a style of C++
+that is so unappealing to any current or future hardware, that the managed
+languages don't seem all that much slower in comparison. The current pattern of
+usage of C++ in games development is so appallingly mismatched to current
+console hardware that it is no wonder that an interpreted language is only in
+the region of 50\% slower under normal use and sometimes
+faster\footnote{http://keithlea.com/javabench/ tells the tale of the server JVM
+being faster than C++. There's some arguments against the results, but there's
+others that back it up. Read, make up your own mind.} in their specialist
+areas. What is this strange language that has embedded itself into the minds of
+C++ games developers? What is it that makes the fashionable way of coding games
+one of the worst ways of making use of the machines we're targeting? Where, in
+essence, is the harm in game-development style object-oriented C++?
+
+\section{The Harm}
+\emph{Virtuals don't cost much, but if you call them a lot it can add up.\\
+aka - death by a thousand papercuts}
+
+The overhead of a virtual call is negligible under simple inspection. Compared
+to what you do inside a virtual call, the extra dereference required seems
+petty and very likely not to have any noticeable side effects other than
+dereference and the extra space taken up by the virtual table pointer. The
+extra dereference before getting the pointer to the function we want to call on
+this particular instance seems to be a trivial addition, but lets have a closer
+look at what is going on.
+
+Firstly, we have a pointer to a class that has derived from a base class with
+virtual methods. This instantly adds the virtual table pointer as the implicit
+first data member of the class. Obviously, there is no way around this, it's in
+the language specification that the data layout be partially up to the compiler
+so it can implement such things as virtual methods by adding hidden members and
+generating new arrays of function pointers behind the scenes. If we try to call
+a virtual method on the class we have to read the first data member in order to
+access the right virtual table for calling. This requires loading from the
+address of the class into a register and adding an offset to the loaded value.
+Every virtual method call is a lookup into a table, so in the compiled code,
+all virtual calls are really function pointer array dereferences, which is
+where the offset comes in.  It's the offset into the array of function
+pointers. Once the address of the real function pointer is generated, it is
+loaded into a register, then used to chance the program counter, via a branch
+instruction.
+
+For multiple inheritance it is slightly more convoluted. 
+
+So let's count up the actual operations involved in this method call: first we
+have a load, then an add, then another load, then a branch. To almost all
+programmers this doesn't seem like a heavy cost to pay for runtime
+polymorphism. Four operations per call so that you can throw all your game
+entities into one array and loop through them updating, rendering, gathering
+collision state, spawning off sound effects. This seems to be a good trade off,
+but it was only a good trade off when these particular instructions were cheap.
+
+Two out of the four instructions are loads, which don't seem like they should
+cost much, but in actual fact, unless you hit the cache, a load takes around
+600 cycles on modern consoles. The add is cheap, to modify the register value
+to address the correct function pointer, but the branch is not always cheap as
+it doesn't know where it's going until the second load completes. This could
+cause cache miss in the instructions. All in all, it's common to see around
+1800 cycles wasted due to a single virtual call in any significantly large
+scale game. In 1800 cycles, the floating point unit alone could have finished
+naively calculating over fifty dot products, or up to 27 square roots. In the
+best case, the virtual table pointer will already be in memory, the object type
+the same as last time, so the function pointer address will be the same, and
+therefore the function pointer will be in cache too, and in that circumstance
+it's likely that the unconditional branch won't stall as the instructions are
+probably still in the cache too. But this best case is fairly uncommon.
+
+The implementation of C++ doesn't like how we iterate over objects. The
+standard way of iterating over a set of heterogeneous objects is to literally
+do that, grab an iterator and call the virtual function on each object in turn.
+In normal game code, this will involve loading the virtual table pointer for
+each and every object. This causes a wait while loading the cache line, and
+cannot easily be avoided. Once the virtual table pointer is loaded, it can be
+used, with the constant offset (the index of the virtual method), to find the
+function pointer to call, however due to the size of virtual functions
+commonly found in games development, the table won't be in the cache.
+Naturally, this will cause another wait for load, and once this load has
+finished, we can only hope that the object is actually the same type as the
+previous element, otherwise we will have to wait some more for the
+instructions to load.
+
+The reason virtual functions in games are large is that games developers have
+had it drilled into them that virtual functions are okay, as long as you don't
+use them in tight loops, which invariably leads to them being used for more
+architectural considerations such as hierarchies of object types, or classes of
+solution helpers in tree like problem solving systems (such as path finding, or
+behaviour trees).
+
+In C++, classes' virtual tables store function pointers by their class. The
+alternative is to have a virtual table for each function and switch function
+pointer on the type of the calling class. This works fine in practice and does
+save some of the overhead as the virtual table would be the same for all the
+calls in a single iteration of a group of objects. However, C++ was designed to
+allow for runtime linking to other libraries, libraries with new classes that
+may inherit from the existing codebase, and due to this, there had to be a way
+to allow a runtime linked class to add new virtual methods, and have them able
+to be called from the original running code. If C++ had gone with function
+oriented virtual tables, the language would have had to runtime patch the
+virtual tables whenever a new library was linked whether at link time for
+statically compiled additions, or at runtime for dynamically linked libraries.
+As it is, using a virtual table per class offers the same functionality but
+doesn't require any link time or runtime modification to the virtual tables as
+the tables are oriented by the classes, which by the language design are
+immutable during link time.
+
+Combining the organisation of virtual tables and the order in which games tend
+to call methods, even when running through lists in a highly predictable
+manner, cache misses are commonplace. It's not just the implementation of
+classes that causes these cache misses, it's any time the instructions to run
+are controlled by data loaded. Games commonly implement scripting languages,
+and these languages are often interpreted and run on a virtual machine. However
+the virtual machine or JIT compiler is implemented, there is always an aspect
+of data controlling which instructions will be called next, and this causes
+branch misprediction. This is why, in general, interpreted languages are
+slower, they either run code based on loaded data in the case of bytecode
+interpreters, or they compile code just in time, which though it creates faster
+code, causes cache misses and thrashing of its own.
+
+When a developers implements and Object-oriented framework without using the
+built-in virtual functions, virtual tables and this pointers present in the C++
+langauge, it doesn't reduce the chance of cache miss unless they use virtual
+tables by function rather than by class. But even when the developer has been
+especially careful, the very fact that they are doing Object-oriented
+programming with games developer access patterns, that of calling single
+functions on arrays of heterogeneous objects, they are still going to have the
+same cache misses as found when the virtual table has survived the call into
+the object. That is, the best they can hope for is one less cache miss per
+virtual call. That still leaves the opportunity for two cache misses, and an
+unconditional branch.
+
+So, with all this apparent inefficiency, what makes games developers stick with
+Object-oriented coding practices? As games developers are frequently cited as a
+source of how the bleeding edge of computer software development is
+progressing, why have they not moved away wholesale from the problem and
+stopped using Object-oriented development practices all together?
+
+\section{Mapping the problem}
+\emph{Objects provide a better mapping from the real
+world description of the problem to the final code solution.} \\ \hfill
+
+Object-oriented design when programming in games starts with thinking about the
+game design in terms of entities. Each entity in the game design is given a
+class, such as ship, player, bullet, or score. Each object maintains its own
+state, communicates with other objects through methods, and provides
+encapsulation so when the implementation of a particular entity changes, the
+other objects that use it or provide it with utility do not need to change.
+Games developers like abstraction as historically, they have had to write games
+for not just one target platform, but usually at least two. In the past it was
+between console manufacturers, and now even games developers on the PC have to
+manage both Windows(tm) and MacOS(tm) platforms. The abstractions in the past
+were mostly hardware access abstractions, and naturally some gameplay
+abstractions as well, but as the game development industry matured, we found
+common forms of abstractions for areas such as physics, AI, and even player
+control. Finding these common abstractions allowed for third party libraries,
+and many of these use Object-oriented design as well. It's quite common for
+libraries to interact with the game through agents. These agent objects contain
+their own state data, whether hidden or publicly accessible, and provide
+functions by which they can be manipulated inside the constraints of the system
+that provided them. The game design inspired objects (such as ship, player,
+level) keep hold of agents and use them to find out what's going on in their
+world. A player object might use their physics agent to find out where they are
+going to be, and what is possible given where they are, and using their input
+agent, find out the player's intention, and in return providing some feedback
+to their physics agent about the forces, and information to their animation
+agent about what animations they need to play. A non-player character could
+mediate between the world physics agent and its AI agent. A car object could
+contain references to physics data for keeping it on the road, and also runtime
+modifiable rendering information can be chained to the collision system to show
+scratches and worse.
+
+The entities in Object-oriented design are containers for data and a place to
+keep all the functions that manipulate that data. Don't confuse these entities
+with those of entity systems, as the entities in Object-oriented design are
+immutable over their lifetime. An Object-oriented entity does not change class
+during its lifetime in C++ because there is no process by which to reconstruct
+a class in place in the language. As can be expected, if you don't have the
+right tools for the job, a good workman works around it. Games developers don't
+change the type of their objects at runtime, instead they create new and
+destroy old in the case of a game entity that needs this functionality.
+
+For example, in a first person shooter, an object will be declared to represent
+the animating player mesh, but when the player dies, a clone would be made to
+represent the dead body as a rag doll. The animating player object is made
+invisible and moved to their next spawn point while the dead body object with
+its different set of virtual functions, and different data, remains where the
+player died so as to let the player watch their dead body. To achieve this
+sleight of hand, where the dead body object sits in as a replacement for the
+player once they are dead, copy constructors need to be defined. When the
+player is spawned back into the game, the player model will  be made visible
+again, and if they wish to, the player can go and visit their dead clone. This
+works remarkably well, but it is a trick that would be unnecessary if the
+player could become a dead rag doll rather than spawn a clone of a different
+type. There is inherent danger in this too, that the cloning could have bugs,
+and cause other issues, and also that if the player dies but somehow is allowed
+to resurrect, then they have to find a way to convert the rag doll back into
+the animating player, and that is no simple feat.
+
+Another example is in AI. The finite state machines that run most game AI
+maintain all the data necessary for all their potential states. If an AI has
+three states, \{ Idle, Making-a-stand, Fleeing-in-terror \} then it has the
+data for all three states. If the Making-a-stand has a scared-points
+accumulator for accounting their fear, so that they can fight, but only up
+until they are too scared to continue, and the Fleeing-in-terror has a timer so
+that they will flee, but only for a certain time, then Idle will have these two
+unnecessary attributes as well. In this trivial example, the AI class has three
+data entries, \{ state, how-scared, flee-time \}, and only one of these data
+entries is used by all three states. If the AI could change type when it
+transitioned from state to state, then it wouldn't even need the state member,
+as that functionality would be covered by the virtual table pointer. The AI
+would only allocate space for each of the state tracking members when in the
+appropriate state. The best we can do in C++ is to fake it by changing the
+virtual table pointer by hand, or setting up a copy constructor for each
+possible transition.
+
+This implementation detail does not cost much, can be worked around, but when
+it does, it bends if not breaks the standard way of doing Object-oriented
+development in C++.
+
+Apart from immutable type, Object-oriented development also has a philosophical
+problem. Consider how humans perceive objects in real life. There is always a
+context to every observation. The humble table, when you look at it, you may
+see it to be a table with four legs, made of wood and modestly polished. If so,
+you will see it as being a brown colour, but you will also see the reflection
+of the light. You will see the grain, but when you think about what colour it
+is, you will think of it as being one colour. However, if you have the training
+of an artist, you will know that what you see is not what is actually there.
+There is no solid colour, and if you are looking at the table, you cannot see
+its precise shape, but only infer it. If you are inferring that it is brown by
+the average light colour entering your eye, then does it cease to be brown if
+you turn off the light? What about if there is too much light and all you can
+see is the reflection off the polished surface? If you look at its rectangular
+form from one of the long sides, then you will not see right angle corners, but
+instead a trapezium. We automatically classify objects when we see them, apply
+our prejudices to them and lock them down to make reasoning about them easier.
+This is why Object-oriented development is so appealing to us. However, what we
+find easy to consume as humans, is not optimal for a computer. When we think
+about game entities being objects, we think about them as wholes. But a
+computer has no concept of objects, and only sees objects as being badly
+organised data and functions organised for maximal cache abuse.
+
+If you take another example from the table, consider the table to have legs
+about three feet long. That's a standard table. If the legs are only one foot
+long, it could be considered to be a coffee table. Short, but still usable as a
+place to throw the magazines and leave your cups. But when you get down to one
+inch long legs, it's no longer a table, but instead just a large piece of wood
+with some stubs stuck on it. We can happily classify the same item but with
+different dimensions into three distinct classes of object. Table, coffee
+table, lump of wood with some little bits of wood on it. But, at what point
+does the lump of wood become a coffee table? Is it somewhere between 4 and 8
+inch long legs? This is the same problem as presented about sand, when does it
+transition from grains of sand, to a pile of sand? How many grains are a pile,
+are a dune? The answer must be that there is no answer. The answer is also
+helpful in understanding how a computer thinks. It doesn't know the specific
+difference between our human classifications because to a certain degree even
+humans don't.
+
+In most games engines, the Object-oriented approach leads to a lot of objects
+in very deep hierarchies. A common ancestor chain for an entity might be:
+PlayerEntity $\rightarrow$ CharacterEntity $\rightarrow$ MovingEntity $\rightarrow$ PhysicalEntity $\rightarrow$ Entity $\rightarrow$
+Serialisable $\rightarrow$ ReferenceCounted $\rightarrow$ Base.
+
+These deep hierarchies virtually guarantee you'll never have a cache hit when
+calling virtual methods, but they also cause a lot of pain when it comes to
+cross-cutting code, that is code that affects or is affected by concerns that
+are unrelated, or incongruous to the hierarchy. Consider a normal game with
+characters moving around a scene. In the scene you will have characters, the
+world, possibly some particle effects, lights, some static and some dynamic. In
+this scene, all these things need to be rendered, or used for rendering. The
+traditional approach is to use multiple inheritance or to make sure that there
+is a Renderable base class somewhere in every entity's inheritance chain. But
+what about entities that make noises? Do you add an audio emitter class as
+well? What about entities that are serialised vs those that are explicitly
+managed by the level? What about those that are so common that they need a
+different memory manager (such as the particles), or those that only optionally
+have to be rendered (like trash, flowers, or grass in the distance).
+Traditionally this has been solved by putting all the most common functionality
+into the core base class for everything in the game, with special exceptions
+for special circumstances, such as when the level is animated, when a player
+character is in an intro or death screen, or is a boss character (who is
+special and deserves a little more code).  These hacks are only necessary if
+you don't use multiple inheritance, but when you use multiple inheritance you
+then start to weave a web that could ultimately end up with virtual
+inheritance, and that can cause some serious performance overhead as it has to
+figure out a lot more than just where the virtual table is. The compromise
+almost always turns out to be some form of cosmic base class anti-pattern.
+
+Object-oriented development is good at providing a human oriented
+representation of the problem in the source code, but bad at providing a
+machine representation of the solution. It is bad at providing a framework for
+creating an optimal solution, so the question remains: why are games developers
+still using Object-oriented techniques to develop games? It's possible its not
+about better design, but instead about make it easier to change the code. It's
+common knowledge that games developers are constantly changing code to match
+the natural evolution of the design of the game, right up until launch. Does
+Object-oriented development provide a good way of making maintenance and
+modification simpler or safer?
+
+\section{Internalised state}
+\emph{Encapsulation makes code more reusable. It's
+easier to modify the implementation without affecting the usage. Maintenance
+and refactoring become easy, quick, and safe.} \\ \hfill
+
+The idea behind encapsulation is to provide a contract to the person using the
+code rather than providing a raw implementation. In theory, well written
+Object-oriented code that uses encapsulation is immune to damage caused by
+changing how an object manipulates its data. If all the code using the object
+complies with the contract and never directly uses any of the data members
+without going through accessor functions, then no matter what you change about
+how the class fulfils that contract, there won't be any new bugs introduced by
+change. In theory, the object implementation can change in any way as long as
+the contract is not modified, but only extended. This is the open closed
+principle. A class should be open for extension, but closed for modification.
+
+A contract is meant to provide some guarantees about how a complex system
+works. In practice, only unit testing can provide these guarantees.
+
+Sometimes, programmers unwittingly rely on hidden features of objects'
+implementations. Sometimes the object they rely on has a bug that just so
+happens to fit their use case. If that bug is fixed, then the code using the
+object no longer works as expected. The use of the contract, though it was kept
+intact, has not helped the other piece of code to maintain working status
+across revisions. Instead it provided false hope that the returned values would
+not change. It doesn't even have to be a bug. Temporal couplings inside
+objects, or accidental or undocumented features that goes away in later
+revisions can also damage the code using the contract without breaking it.
+
+One example would be the case where an object has a method that returns a list.
+If the internal representation is such that it always maintains a sorted list,
+and when the method is called it returns some subset of that list, it would be
+natural to assume that in most implementations of the method the subset would
+be sorted also. A concrete example could be a pickup manager that kept a list
+of pickups sorted by name. If the function returns all the pickup types that
+match a filter, then the caller could iterate the returned list until it found
+the pickup it wanted. To speed things up, it could early-out if it found a
+pickup with a name later than the item it was looking for, or  it could do a
+binary search of the returned list. In both those cases, if the internal
+representation changed to something that wasn't ordered by name, then the code
+would no longer work. If the internal representation was changed so it was
+ordered by hash, then the early-out and binary search would be completely
+broken.
+
+Another example of the contract being too little information, in many linked
+list implementations, there is a decision made about whether to store the
+length of the list or not. The choice to store a count member will make
+multi-threaded access slower, but the choice not to store it will make finding
+the length of the list an O(n) operation. For situations where you only want to
+find out whether the list if empty, if the object contract only supplies a
+get\_count() function, you cannot know for sure whether it would be cheaper to
+check if the count was greater than zero, or check if the being() and end() are
+the same.
+
+Encapsulation only provides a way to hide bugs and cause assumptions in
+programmers. There is an old saying about assumptions, and encapsulation
+doesn't let you confirm or deny them unless you have access to the source code.
+If you have, and you need to look at it to find out what went wrong, then all
+that the encapsulation has done is add another layer to work around rather than
+add any functionality of its own.  
+
+\section{Hierarchical design}
+\emph{Inheritance allows reuse of code by extension.
+Adding new features is simple.} \\ \hfill
+
+Inheritance was seen as a major reason to use classes in C++ by games
+programmers. The obvious benefit was being able to inherit from multiple
+interfaces to gain attributes or agency in system objects such as physics,
+animation, and rendering. In the early days of C++ adoption, the hierarchies
+were shallow, not usually going much more than three layers deep, but later it
+became commonplace to find more than nine levels of ancestors in central
+classes such as that of the player, their vehicles, or the AI players. For
+example, in UnrealTournament, the minigun ammo object had this:
+
+Miniammo $\rightarrow$ TournamentAmmo $\rightarrow$ Ammo $\rightarrow$ Pickup $\rightarrow$ Inventory $\rightarrow$ Actor $\rightarrow$ Object
+
+Games developers use inheritance to provide a robust way to implement
+polymorphism in games, where many game entities can be updated, rendered, or
+queried en-mass, without any hand coded checking of type. They also appreciate
+the reduced copy pasting, because inheriting from a class also adds
+functionality to a class. This early form of mix-ins was seen to reduce errors
+in coding as there were often times where bugs only existed because a
+programmer had fixed a bug in one place, but not all of them. Gradually,
+multiple inheritance faded into interfaces only, the practice of only
+inheriting from one real class, and any others had to be pure virtual interface
+classes as per the Java definition.
+
+Although it seems like inheriting from class to extend its functionality is
+safe, there are many circumstances where classes don't quite behave as expected
+when methods are overridden. To extend a class, it is often necessary to read
+the source, not just of the class you're inheriting, but also the classes it
+inherits too. If a base class creates a pure virtual method, then it forces the
+child class to implement that method. If this was for a good reason, then that
+should be enforced, but you cannot enforce that every inheriting class
+implements this method, only the first instantiable class inheriting it. This
+can lead to obscure bugs where a new class sometimes acts or is treated like
+the class it is inheriting from.
+
+Another pitfall of inheritance in C++ comes in the form of runtime versus
+compile time linking. A good example is default arguments on method calls, and
+badly understood overriding rules. What would you expect the output of the
+following program to be?
+
+\begin{lstlisting}
+class A {
+	virtual void foo( int bar = 5 ) { cout << bar; }
+};
+class B : public A {
+	void foo( int bar = 7 ) { cout << bar * 2; }
+};
+int main( int argc, char *argv[] ) {
+	A *a = new B;
+	a->foo();
+	return 0;
+}
+\end{lstlisting}
+
+Would you be surprised to find out it reported a value of 10? Some code relies
+on the compiled state, some on runtime. Adding new functionality to a class by
+extending it can quickly become a dangerous game as classes from two layers
+down can cause coupling side effects, throw exceptions (or worse, not throw an
+exception and quietly fail,) circumvent your changes, or possibly just make it
+impossible to implement your feature as they might already be taking up the
+namespace or have some other incompatibility with your plans, such as requiring
+a certain alignment or need to be in a certain bank of ram.
+
+Inheritance does provide a clean way of implementing runtime polymorphism, but
+it's not the only way as we saw earlier. Adding a new feature by inheritance
+requires revisiting the base class, providing a default implementation, or a
+pure virtual, then providing implementations for all the classes that need to
+handle the new feature. Obviously this has required access to the base class,
+and possible touching of all child classes if the pure virtual route is taken,
+so even though the compiler can help you find all the places where the code
+needs to change, it has not made it significantly easier to change the code.
+
+Using a type member instead of a virtual table pointer can give you the same
+runtime code linking,  could be better for cache misses, and could be easier to
+add new features and reason about because it has less baggage when it comes to
+implementing those new features, provides a very simple way to mix and match
+capabilities compared to inheritance, and keeps the polymorphic code in one
+place. For example, in the fake virtual function go-forward, the class Car will
+step on the gas. In the class Person, it will set the direction vector. In the
+class UFO, it will also just set the direction vector. This sounds like a job
+for a switch statement fall through. In the fake virtual function re-fuel, the
+class Car and UFO will start a re-fuel timer and remain stationary while
+their fuelling up animatios play, whereas the Person class could just reduce
+their stamina-potion count and be instantly refuelled. Again, a switch
+statement with fall through provides all the runtime polymorphism you need,
+but you don't need to multiple inherit in order to provide differing
+functionality on a per class per function level. Being able to pick what each
+method does in a class is not something that inheritance is good at, but it
+is something desirable, and non inheritance based polymorphism does allow it.
+
+The original reason for using inheritance was that you would not need to
+revisit the base class, or change any of the existing code in order to extend
+and add functionality to the codebase, however, it is highly likely that you
+will at least need to view the base class implementation, and with changing
+specifications in games, it's also quite common to need changes at the base
+class level. Inheritance also inhibits certain types of analysis by locking
+people into thinking of objects as having IS-A relationships with the other
+object types in the game. A lot of flexibility is lost when a programmer is
+locked out of conceptualising objects as being combinations of features.
+Reducing multiple inheritance to interfaces, though helping to reduce the code
+complexity, has drawn a veil over the one good way of building up classes as
+compound objects. Although not a good solution in itself as it still abuses the
+cache, a switch on type seems to offer similar functionality to virtual tables
+without some of the associated baggage. So why put things in classes?
+
+\section{Divions of labour}
+\emph{Modular architecture for reduced coupling and
+better testing} \\ \hfill
+
+The object-oriented paradigm is seen as another tool in the kit when it comes
+to ensuring quality of code. Strictly adhering to the open closed principle of
+always using accessors, methods, and inheritance to use or extend objects,
+programmers write significantly more modular code than they do if programming
+from a purely procedural perspective. This modularity separates each object's
+code into units. These units are collections of all the data and methods that
+act upon the data. It has been written about many times that testing objects is
+simpler because each object can be tested in isolation.
+
+However, Object-oriented design suffers from the problem of errors in
+communication. Objects are not systems, and systems need to be tested, and
+systems comprise of not only objects, but their inherent communication. The
+communication of objects is difficult to test, because in practice, it is hard
+to isolate the interactions between classes. Object-oriented development leads
+to an Object-oriented view of the system which makes it hard to isolate
+non-objects such as data transforms, communication, and temporal coupling.
+
+Modular architecture is good because it limits the potential damage caused by
+changes, but just like encapsulation before, the contract to any module has to
+be unambiguous so as to reduce the chance of external reliance on unintended
+side effects of the implementation.
+
+The reason Object-oriented modular approach doesn't work as well, is that the
+modules are defined by object boundary, not by a higher level concept. Good
+examples of modularity include stdio's FILE, the CRT's malloc/free, The
+NvTriStrip library's GenerateStrips. Each of these provide a solid, documented,
+narrow set of functions to access functionality that could otherwise be
+overwhelming and difficult to reason about.
+
+Modularity in Object-oriented development can offer protection from other
+programmers who don't understand the code. An object's methods are often the
+instruction manual for an object in the eyes of a co-worker, so writing all the
+important manipulation methods in one block can give clues to anyone using the
+class. The modularity is important here because game development objects are
+regularly large, offering a lot of functionality spread across their many
+different aspects. Rather than find a way to address cross cutting concerns,
+game objects tend to fulfil all requirements rather than restrict themselves to
+their original design. Because of this bloating, the modular approach, that is,
+collecting methods by their concern in the source, can be beneficial to
+programmers coming at the object fresh. The obvious way to fix this would be to
+use a paradigm that supports cross cutting concerns at a more fundamental
+level, but Object-oriented development is know to be inefficient at
+representing this in code.
+
+If Object-oriented development doesn't increase modularity in such a way as it
+provides better results than explicitly modularising code, then what does it
+offer?
+
+\section{Reusable generic code}
+\emph{Faster development time through reuse of
+generic code} \\ \hfill
+
+It is regarded as one of the holy grails of development to be able to
+consistently reduce development overhead by reusing old code. In order to stop
+wasting any of the investment in time and effort, it's been assumed that it
+will be possible to put together an application from existing code and only
+have to write some minor new features. The unfortunate truth is that any
+interesting new features you want to add will probably be incompatible with
+your old code and old way of laying out your data, and you will need to either
+rewrite the old code to allow for the new feature, or rewrite the old code to
+allow for the new data layout. If a software project can be built from existing
+solutions, objects that were invented to provide features for an old project,
+then it's probably not very complex. Any project for significant complexity
+includes hundreds if not thousands of special case objects that provide all
+particular needs of that project. For example, the vast majority of games will
+have a player class, but almost none share a common core set of attributes. Is
+there a world position member in a game of poker? Is there a hit point count
+member in the player of a racing game? Does the player have a gamer tag in a
+purely offline game? Having a generic class that can be reused doesn't make the
+game easier to create, all it does is move the specialisation into somewhere
+else. Some game toolkits do this by allowing script to extend the basic
+classes. Some game engines limit the gameplay to a certain genre and allow
+extension away from that through data driven means. No-one has so far created a
+game API, because to do so, it would have to be so generic that it wouldn't
+provide anything more than what we already have with our languages we use for
+development.
+
+Reuse, being hankered after by production, and thought of so highly by anyone
+without much experience in making games, has become an end in itself for many
+games developers. The pitfall of generics is a focus on keeping a class generic
+enough to be reused or re-purposed without thought as to why, or how. The
+first, the why, is a major stumbling block and needs to be taught out of
+developers as quickly as possible. Making something generic, for the sake of
+generality, is not a valid goal. It adds time to development without adding
+value. Some developers would cite this as short sighted, however, it is the how
+that deflates this argument. How do you generalise a class if you only use it
+in one place? The implementation of a class is testable only so far as it can
+be tested, and if you only use a class in one place, you can only test that it
+works in one situation. If you then generalise the class, yet don't have any
+other test cases than the first situation, then all you can test is that you
+didn't break the class when generalising it. So, if you cannot guarantee that
+the class works for other types or situations, all you have done by
+generalising the class is added more code for bugs to hide in. The resultant
+bugs are now hidden in code that works, possibly even tested, which means that
+any bugs introduced during this generalising have been stamped and approved.
+
+Test driven development implicitly denies generic coding until the point where
+it is a good choice to do so. The only time when it is a good choice to move
+code to a more generic state, is when it reduces redundancy through reuse of
+common functionality.
+
+Generic code has to fulfil more than just a basic set of features if it is to
+be used in many situations. If you write a templated array container, access to
+the array through the square bracket operators would be considered a basic
+feature, but you will also want to write iterators for it and possibly add an
+insert routine to take the headache out of shuffling the array up in memory.
+Little bugs can creep in if you rewrite these functions whenever you need them,
+and linked lists are notorious for having bugs in quick and dirty
+implementations. To be fit for use by all users, any generic container should
+provide a full set of methods for manipulation, and the STL does that. There
+are hundreds of different functions to understand before you can be considered
+an STL-expert, and you have to be an STL-expert before you can be sure you're
+writing efficient code with the STL. There is a large amount of documentation
+available for the various implementations of the STL. Most of the
+implementations of the STL are very similar if not functionally the same. Even
+so, it can take some time for a programmer to become a valuable STL programmer
+due to this need to learn another langauge. The programmer has to learn a new
+language, the language of the STL, with its own nouns verbs and adjectives. To
+limit this, many games companies have a much reduced feature set
+reinterpretation of the STL that optionally provides better memory handling
+(because of the awkward hardware), more choice for the containers (so that you
+may choose a hash\_map or trie, rather than just a map), or explicit
+implementations of simpler containers such as stack or singly linked lists and
+their intrusive brethren. These libraries are normally smaller in scope and are
+therefore easier to learn and hack than the STL variants, but they still need
+to be learnt and that takes some time. In the past this was a good compromise,
+but now the STL has extensive online documentation, there is no excuse not to
+use the STL except where memory or compilation time is concerned.
+
+The takeaway from this however, is that generic code still needs to be learnt
+in order for the coder to be efficient, or not cause accidental performance
+bottlenecks. If you go with the STL, then at least you have a lot of
+documentation on your side. If your game company implements an amazingly
+complex template library, don't expect any coders to use it until they've had
+enough time to learn it, and that means that if you write generic code, expect
+people to not use it unless they come across it accidentally, or have been
+explicitly told to, as they won't know it's there, or won't trust it. In other
+words, starting out by writing generic code is a good way to write a lot of
+code quickly without adding any value to your development.
+
